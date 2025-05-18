@@ -20,15 +20,13 @@ public static class ObjectMapper
     }
 
     public static TDestination Map<TDestination>(
-            this object source,
-            Action<TDestination>? customMapping = null,
-            MappingConfiguration? config = null,
-            bool handleCircularReferences = true)
-            where TDestination : new()
+        this object source,
+        Action<TDestination>? customMapping = null,
+        MappingConfiguration? config = null,
+        bool handleCircularReferences = true)
+        where TDestination : new()
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
-        if (config == null)
-            throw new InvalidOperationException("Mapping configuration is required. Use a MappingConfiguration instance to define property mappings.");
 
         var destination = new TDestination();
         MapProperties(source, destination, config, handleCircularReferences ? new HashSet<object>(ReferenceEqualityComparer.Instance) : null).GetAwaiter().GetResult();
@@ -37,15 +35,13 @@ public static class ObjectMapper
     }
 
     public static async Task<TDestination> MapAsync<TDestination>(
-             this object source,
-             Func<TDestination, Task>? customMapping = null,
-             MappingConfiguration? config = null,
-             bool handleCircularReferences = true)
-             where TDestination : new()
+        this object source,
+        Func<TDestination, Task>? customMapping = null,
+        MappingConfiguration? config = null,
+        bool handleCircularReferences = true)
+        where TDestination : new()
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
-        if (config == null)
-            throw new InvalidOperationException("Mapping configuration is required. Use a MappingConfiguration instance to define property mappings.");
 
         var destination = new TDestination();
         await MapProperties(source, destination, config, handleCircularReferences ? new HashSet<object>(ReferenceEqualityComparer.Instance) : null);
@@ -54,13 +50,11 @@ public static class ObjectMapper
     }
 
     public static List<TDestination> MapCollection<TDestination>(
-            this IEnumerable source,
-            MappingConfiguration? config = null)
-            where TDestination : new()
+        this IEnumerable source,
+        MappingConfiguration? config = null)
+        where TDestination : new()
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
-        if (config == null)
-            throw new InvalidOperationException("Mapping configuration is required. Use a MappingConfiguration instance to define property mappings.");
 
         var destinationList = new List<TDestination>();
         foreach (var item in source)
@@ -72,14 +66,12 @@ public static class ObjectMapper
     }
 
     public static async Task<List<TDestination>> MapCollectionAsync<TDestination>(
-             this IEnumerable source,
-             Func<TDestination, Task>? customMapping = null,
-             MappingConfiguration? config = null)
-             where TDestination : new()
+        this IEnumerable source,
+        Func<TDestination, Task>? customMapping = null,
+        MappingConfiguration? config = null)
+        where TDestination : new()
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
-        if (config == null)
-            throw new InvalidOperationException("Mapping configuration is required. Use a MappingConfiguration instance to define property mappings.");
 
         var destinationList = new List<TDestination>();
         foreach (var item in source)
@@ -91,10 +83,10 @@ public static class ObjectMapper
     }
 
     private static async Task MapProperties(
-             object source,
-             object destination,
-             MappingConfiguration config,
-             HashSet<object>? visited)
+        object source,
+        object destination,
+        MappingConfiguration? config,
+        HashSet<object>? visited)
     {
         if (source == null || destination == null) return;
         if (visited?.Contains(source) == true) return;
@@ -105,7 +97,7 @@ public static class ObjectMapper
         var destType = destination.GetType();
         var sourceProps = MappingUtils.GetCachedProperties(sourceType);
         var destProps = MappingUtils.GetCachedProperties(destType).ToDictionary(p => p.Name, p => p);
-        var mappings = config.PropertyMappings.GetValueOrDefault((sourceType, destType)) ?? new Dictionary<string, (string, int)>();
+        var mappings = config?.PropertyMappings.GetValueOrDefault((sourceType, destType)) ?? new Dictionary<string, (string, int)>();
 
         // Filter mappings by highest priority for each destination property
         var filteredMappings = mappings
@@ -113,107 +105,123 @@ public static class ObjectMapper
             .Select(g => g.OrderByDescending(m => m.Value.Priority).First())
             .ToDictionary(m => m.Key, m => m.Value);
 
-        foreach (var sourceProp in sourceProps)
+        // If config is null or no mappings exist, fall back to automatic mapping
+        if (config == null || mappings.Count == 0)
         {
-            var sourcePropName = sourceProp.Name;
-            if (config.ExcludedProperties.Contains((sourceType, destType, sourcePropName)) ||
-                config._globallyExcludedProperties.Contains(sourcePropName))
-                continue;
-
-            if (!filteredMappings.TryGetValue(sourcePropName, out var mapping))
-                continue;
-
-            var (destPropName, _) = mapping;
-            if (!destProps.TryGetValue(destPropName, out var destProp) || destProp == null || !destProp.CanWrite)
+            foreach (var sourceProp in sourceProps)
             {
-                if (config.DefaultValues.TryGetValue((sourceType, destType, destPropName), out var defaultValue))
-                    destProp?.SetValue(destination, defaultValue);
-                continue;
-            }
-
-            // Check conditional mapping
-            if (config.ConditionalMappings.TryGetValue((sourceType, destType, sourcePropName), out var condition) &&
-                condition != null && !condition(source))
-                continue;
-
-            var sourceValue = sourceProp.GetValue(source);
-            if (sourceValue == null)
-            {
-                var defaultKey = (sourceType, destType, destPropName);
-                var valueToSet = config.DefaultValues.ContainsKey(defaultKey) ? config.DefaultValues[defaultKey] : null;
-                destProp.SetValue(destination, valueToSet);
-                continue;
-            }
-
-            try
-            {
-                // Apply composed pipeline if defined
-                object mappedValue = sourceValue;
-                if (config._composedPipelines.TryGetValue((sourceType, destType, sourcePropName), out var pipeline))
+                if (destProps.TryGetValue(sourceProp.Name, out var destProp) && destProp.CanWrite &&
+                    sourceProp.PropertyType.IsAssignableTo(destProp.PropertyType))
                 {
-                    if (pipeline.AsyncConverter != null)
-                        mappedValue = await (Task<object>)pipeline.AsyncConverter.DynamicInvoke(sourceValue)!;
-                    else if (pipeline.Converter != null)
-                        mappedValue = pipeline.Converter.DynamicInvoke(sourceValue)!;
-                    else if (config.HasConverterFallback(sourceType, destType, sourceProp.PropertyType, destProp.PropertyType))
-                    {
-                        var fallback = config.GetConverterFallback(sourceType, destType, sourceProp.PropertyType, destProp.PropertyType);
-                        if (fallback != null)
-                            mappedValue = await fallback(sourceValue);
-                    }
-
-                    foreach (var (transformer, _) in pipeline.AsyncTransformers.OrderBy(t => t.Order))
-                    {
-                        mappedValue = await (Task<object>)transformer.DynamicInvoke(mappedValue)!;
-                    }
-
-                    foreach (var (transformer, _) in pipeline.Transformers.OrderBy(t => t.Order))
-                    {
-                        mappedValue = transformer.DynamicInvoke(mappedValue)!;
-                    }
+                    var sourceValue = sourceProp.GetValue(source);
+                    destProp.SetValue(destination, sourceValue);
                 }
-                else
-                {
-                    // Apply individual converters and transformations
-                    if (config._asyncTypeConverters.TryGetValue((sourceType, destType, sourcePropName), out var asyncConverter) && asyncConverter != null)
-                    {
-                        mappedValue = await (Task<object>)asyncConverter.DynamicInvoke(sourceValue)!;
-                    }
-                    else if (config._typeConverters.TryGetValue((sourceType, destType, sourcePropName), out var converter) && converter != null)
-                    {
-                        mappedValue = converter.DynamicInvoke(sourceValue)!;
-                    }
-                    else if (config.HasConverterFallback(sourceType, destType, sourceProp.PropertyType, destProp.PropertyType))
-                    {
-                        var fallback = config.GetConverterFallback(sourceType, destType, sourceProp.PropertyType, destProp.PropertyType);
-                        if (fallback != null)
-                            mappedValue = await fallback(sourceValue);
-                    }
+            }
+        }
+        else
+        {
+            foreach (var sourceProp in sourceProps)
+            {
+                var sourcePropName = sourceProp.Name;
+                if (config.ExcludedProperties.Contains((sourceType, destType, sourcePropName)) ||
+                    config._globallyExcludedProperties.Contains(sourcePropName))
+                    continue;
 
-                    if (config._asyncPropertyTransformations.TryGetValue((sourceType, destType, sourcePropName), out var asyncTransformers) && asyncTransformers != null)
+                if (!filteredMappings.TryGetValue(sourcePropName, out var mapping))
+                    continue;
+
+                var (destPropName, _) = mapping;
+                if (!destProps.TryGetValue(destPropName, out var destProp) || destProp == null || !destProp.CanWrite)
+                {
+                    if (config.DefaultValues.TryGetValue((sourceType, destType, destPropName), out var defaultValue))
+                        destProp?.SetValue(destination, defaultValue);
+                    continue;
+                }
+
+                // Check conditional mapping
+                if (config.ConditionalMappings.TryGetValue((sourceType, destType, sourcePropName), out var condition) &&
+                    condition != null && !condition(source))
+                    continue;
+
+                var sourceValue = sourceProp.GetValue(source);
+                if (sourceValue == null)
+                {
+                    var defaultKey = (sourceType, destType, destPropName);
+                    var valueToSet = config.DefaultValues.ContainsKey(defaultKey) ? config.DefaultValues[defaultKey] : null;
+                    destProp.SetValue(destination, valueToSet);
+                    continue;
+                }
+
+                try
+                {
+                    // Apply composed pipeline if defined
+                    object mappedValue = sourceValue;
+                    if (config._composedPipelines.TryGetValue((sourceType, destType, sourcePropName), out var pipeline))
                     {
-                        foreach (var (transformer, order) in asyncTransformers.OrderBy(t => t.Order))
+                        if (pipeline.AsyncConverter != null)
+                            mappedValue = await (Task<object>)pipeline.AsyncConverter.DynamicInvoke(sourceValue)!;
+                        else if (pipeline.Converter != null)
+                            mappedValue = pipeline.Converter.DynamicInvoke(sourceValue)!;
+                        else if (config.HasConverterFallback(sourceType, destType, sourceProp.PropertyType, destProp.PropertyType))
+                        {
+                            var fallback = config.GetConverterFallback(sourceType, destType, sourceProp.PropertyType, destProp.PropertyType);
+                            if (fallback != null)
+                                mappedValue = await fallback(sourceValue);
+                        }
+
+                        foreach (var (transformer, _) in pipeline.AsyncTransformers.OrderBy(t => t.Order))
                         {
                             mappedValue = await (Task<object>)transformer.DynamicInvoke(mappedValue)!;
                         }
-                    }
 
-                    if (config._propertyTransformations.TryGetValue((sourceType, destType, sourcePropName), out var transformers) && transformers != null)
-                    {
-                        foreach (var (transformer, order) in transformers.OrderBy(t => t.Order))
+                        foreach (var (transformer, _) in pipeline.Transformers.OrderBy(t => t.Order))
                         {
                             mappedValue = transformer.DynamicInvoke(mappedValue)!;
                         }
                     }
-                }
+                    else
+                    {
+                        // Apply individual converters and transformations
+                        if (config._asyncTypeConverters.TryGetValue((sourceType, destType, sourcePropName), out var asyncConverter) && asyncConverter != null)
+                        {
+                            mappedValue = await (Task<object>)asyncConverter.DynamicInvoke(sourceValue)!;
+                        }
+                        else if (config._typeConverters.TryGetValue((sourceType, destType, sourcePropName), out var converter) && converter != null)
+                        {
+                            mappedValue = converter.DynamicInvoke(sourceValue)!;
+                        }
+                        else if (config.HasConverterFallback(sourceType, destType, sourceProp.PropertyType, destProp.PropertyType))
+                        {
+                            var fallback = config.GetConverterFallback(sourceType, destType, sourceProp.PropertyType, destProp.PropertyType);
+                            if (fallback != null)
+                                mappedValue = await fallback(sourceValue);
+                        }
 
-                await MapProperty(sourceProp, destProp, mappedValue, destination, config, visited);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException(
-                    $"Failed to map property '{sourcePropName}' from {sourceType.Name} to {destType.Name}: {ex.Message}",
-                    ex);
+                        if (config._asyncPropertyTransformations.TryGetValue((sourceType, destType, sourcePropName), out var asyncTransformers) && asyncTransformers != null)
+                        {
+                            foreach (var (transformer, order) in asyncTransformers.OrderBy(t => t.Order))
+                            {
+                                mappedValue = await (Task<object>)transformer.DynamicInvoke(mappedValue)!;
+                            }
+                        }
+
+                        if (config._propertyTransformations.TryGetValue((sourceType, destType, sourcePropName), out var transformers) && transformers != null)
+                        {
+                            foreach (var (transformer, order) in transformers.OrderBy(t => t.Order))
+                            {
+                                mappedValue = transformer.DynamicInvoke(mappedValue)!;
+                            }
+                        }
+                    }
+
+                    await MapProperty(sourceProp, destProp, mappedValue, destination, config, visited);
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to map property '{sourcePropName}' from {sourceType.Name} to {destType.Name}: {ex.Message}",
+                        ex);
+                }
             }
         }
 
@@ -221,17 +229,17 @@ public static class ObjectMapper
     }
 
     private static async Task MapProperty(
-            PropertyInfo sourceProp,
-            PropertyInfo destProp,
-            object sourceValue,
-            object destination,
-            MappingConfiguration config,
-            HashSet<object>? visited)
+        PropertyInfo sourceProp,
+        PropertyInfo destProp,
+        object sourceValue,
+        object destination,
+        MappingConfiguration? config,
+        HashSet<object>? visited)
     {
         if (MappingUtils.IsSimpleType(destProp.PropertyType))
         {
             if (!sourceProp.PropertyType.IsAssignableTo(destProp.PropertyType) &&
-                !config.HasConverterFallback(sourceProp.DeclaringType!, destProp.DeclaringType!, sourceProp.PropertyType, destProp.PropertyType))
+                (config == null || !config.HasConverterFallback(sourceProp.DeclaringType!, destProp.DeclaringType!, sourceProp.PropertyType, destProp.PropertyType)))
             {
                 throw new InvalidOperationException(
                     $"Type mismatch: cannot map from {sourceProp.PropertyType.Name} to {destProp.PropertyType.Name}");
@@ -254,10 +262,10 @@ public static class ObjectMapper
     }
 
     private static async Task<object?> MapCollection(
-             IEnumerable? source,
-             Type destinationType,
-             MappingConfiguration config,
-             HashSet<object>? visited)
+        IEnumerable? source,
+        Type destinationType,
+        MappingConfiguration? config,
+        HashSet<object>? visited)
     {
         if (source == null) return null;
 

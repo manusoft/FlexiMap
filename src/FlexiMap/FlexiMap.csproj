@@ -2,6 +2,7 @@
 
   <PropertyGroup>
 	<TargetFrameworks>net8.0;net9.0;</TargetFrameworks>
+	<NoWarn>CS8600</NoWarn>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 	<AssemblyName>FlexiMap</AssemblyName>
