@@ -8,7 +8,7 @@ Name = "Source Name (Auto)",
 Description = "Source Description (Auto)"
 };
 
-var destination1 = source1.Map<Destination>(); // No config, uses automatic mapping
+var destination1 = source1.Map<Destination>(caseInsensitive: true); // No config, uses automatic mapping
 
 Console.WriteLine("Without Configuration:");
 Console.WriteLine($"Name: {destination1.Name}");
@@ -27,7 +27,7 @@ Name = "Source Name (Config)",
 Description = "Source Description (Config)"
 };
 
-var destination2 = source2.Map<Destination>(config: config); // With config, uses explicit mapping
+var destination2 = source2.Map<Destination>(config: config, caseInsensitive: true); // With config, uses explicit mapping
 
 Console.WriteLine("\nWith Configuration:");
 Console.WriteLine($"Name: {destination2.Name}");
@@ -47,3 +47,4 @@ public class Destination
     public string Name { get; set; }
     public string Description { get; set; }
 }
+

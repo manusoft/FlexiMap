@@ -6,10 +6,15 @@ namespace FlexiMap;
 public static class ObjectMapper
 {
     private static readonly MappingConfiguration _defaultConfig = new();
+    private static bool _caseInsensitiveAutomaticMapping = false;
+
+    public static void ConfigureAutomaticMapping(bool caseInsensitive = false)
+    {
+        _caseInsensitiveAutomaticMapping = caseInsensitive;
+    }
 
     static ObjectMapper()
     {
-        // Set a generic type pair before adding converter fallbacks
         _defaultConfig.ForTypes<object, object>()
             .AddConverterFallback<int, string>(x => x.ToString())
             .AddConverterFallback<double, string>(x => x.ToString("F2"))
@@ -20,39 +25,42 @@ public static class ObjectMapper
     }
 
     public static TDestination Map<TDestination>(
-        this object source,
-        Action<TDestination>? customMapping = null,
-        MappingConfiguration? config = null,
-        bool handleCircularReferences = true)
-        where TDestination : new()
+            this object source,
+            Action<TDestination>? customMapping = null,
+            MappingConfiguration? config = null,
+            bool handleCircularReferences = true,
+            bool caseInsensitive = false)
+            where TDestination : new()
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
 
         var destination = new TDestination();
-        MapProperties(source, destination, config, handleCircularReferences ? new HashSet<object>(ReferenceEqualityComparer.Instance) : null).GetAwaiter().GetResult();
+        MapProperties(source, destination, config, handleCircularReferences ? new HashSet<object>(ReferenceEqualityComparer.Instance) : null, caseInsensitive || _caseInsensitiveAutomaticMapping).GetAwaiter().GetResult();
         customMapping?.Invoke(destination);
         return destination;
     }
 
     public static async Task<TDestination> MapAsync<TDestination>(
-        this object source,
-        Func<TDestination, Task>? customMapping = null,
-        MappingConfiguration? config = null,
-        bool handleCircularReferences = true)
-        where TDestination : new()
+             this object source,
+             Func<TDestination, Task>? customMapping = null,
+             MappingConfiguration? config = null,
+             bool handleCircularReferences = true,
+             bool caseInsensitive = false)
+             where TDestination : new()
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
 
         var destination = new TDestination();
-        await MapProperties(source, destination, config, handleCircularReferences ? new HashSet<object>(ReferenceEqualityComparer.Instance) : null);
+        await MapProperties(source, destination, config, handleCircularReferences ? new HashSet<object>(ReferenceEqualityComparer.Instance) : null, caseInsensitive || _caseInsensitiveAutomaticMapping);
         if (customMapping != null) await customMapping(destination);
         return destination;
     }
 
     public static List<TDestination> MapCollection<TDestination>(
-        this IEnumerable source,
-        MappingConfiguration? config = null)
-        where TDestination : new()
+             this IEnumerable source,
+             MappingConfiguration? config = null,
+             bool caseInsensitive = false)
+             where TDestination : new()
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
 
@@ -60,16 +68,17 @@ public static class ObjectMapper
         foreach (var item in source)
         {
             if (item == null) continue;
-            destinationList.Add(item.Map<TDestination>(config: config));
+            destinationList.Add(item.Map<TDestination>(config: config, caseInsensitive: caseInsensitive));
         }
         return destinationList;
     }
 
     public static async Task<List<TDestination>> MapCollectionAsync<TDestination>(
-        this IEnumerable source,
-        Func<TDestination, Task>? customMapping = null,
-        MappingConfiguration? config = null)
-        where TDestination : new()
+            this IEnumerable source,
+            Func<TDestination, Task>? customMapping = null,
+            MappingConfiguration? config = null,
+            bool caseInsensitive = false)
+            where TDestination : new()
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
 
@@ -77,16 +86,17 @@ public static class ObjectMapper
         foreach (var item in source)
         {
             if (item == null) continue;
-            destinationList.Add(await item.MapAsync(customMapping, config));
+            destinationList.Add(await item.MapAsync(customMapping, config, caseInsensitive: caseInsensitive));
         }
         return destinationList;
     }
 
     private static async Task MapProperties(
-        object source,
-        object destination,
-        MappingConfiguration? config,
-        HashSet<object>? visited)
+            object source,
+            object destination,
+            MappingConfiguration? config,
+            HashSet<object>? visited,
+            bool caseInsensitive)
     {
         if (source == null || destination == null) return;
         if (visited?.Contains(source) == true) return;
@@ -96,16 +106,17 @@ public static class ObjectMapper
         var sourceType = source.GetType();
         var destType = destination.GetType();
         var sourceProps = MappingUtils.GetCachedProperties(sourceType);
-        var destProps = MappingUtils.GetCachedProperties(destType).ToDictionary(p => p.Name, p => p);
+        var destPropsDict = MappingUtils.GetCachedProperties(destType);
+        var destProps = caseInsensitive
+            ? new Dictionary<string, PropertyInfo>(destPropsDict.ToDictionary(p => p.Name, p => p, StringComparer.OrdinalIgnoreCase))
+            : destPropsDict.ToDictionary(p => p.Name, p => p);
         var mappings = config?.PropertyMappings.GetValueOrDefault((sourceType, destType)) ?? new Dictionary<string, (string, int)>();
 
-        // Filter mappings by highest priority for each destination property
         var filteredMappings = mappings
             .GroupBy(m => m.Value.DestProp)
             .Select(g => g.OrderByDescending(m => m.Value.Priority).First())
             .ToDictionary(m => m.Key, m => m.Value);
 
-        // If config is null or no mappings exist, fall back to automatic mapping
         if (config == null || mappings.Count == 0)
         {
             foreach (var sourceProp in sourceProps)
@@ -138,7 +149,6 @@ public static class ObjectMapper
                     continue;
                 }
 
-                // Check conditional mapping
                 if (config.ConditionalMappings.TryGetValue((sourceType, destType, sourcePropName), out var condition) &&
                     condition != null && !condition(source))
                     continue;
@@ -154,7 +164,6 @@ public static class ObjectMapper
 
                 try
                 {
-                    // Apply composed pipeline if defined
                     object mappedValue = sourceValue;
                     if (config._composedPipelines.TryGetValue((sourceType, destType, sourcePropName), out var pipeline))
                     {
@@ -181,7 +190,6 @@ public static class ObjectMapper
                     }
                     else
                     {
-                        // Apply individual converters and transformations
                         if (config._asyncTypeConverters.TryGetValue((sourceType, destType, sourcePropName), out var asyncConverter) && asyncConverter != null)
                         {
                             mappedValue = await (Task<object>)asyncConverter.DynamicInvoke(sourceValue)!;
@@ -229,12 +237,12 @@ public static class ObjectMapper
     }
 
     private static async Task MapProperty(
-        PropertyInfo sourceProp,
-        PropertyInfo destProp,
-        object sourceValue,
-        object destination,
-        MappingConfiguration? config,
-        HashSet<object>? visited)
+             PropertyInfo sourceProp,
+             PropertyInfo destProp,
+             object sourceValue,
+             object destination,
+             MappingConfiguration? config,
+             HashSet<object>? visited)
     {
         if (MappingUtils.IsSimpleType(destProp.PropertyType))
         {
@@ -256,16 +264,16 @@ public static class ObjectMapper
             var nestedObject = Activator.CreateInstance(destProp.PropertyType);
             if (nestedObject == null)
                 throw new InvalidOperationException($"Cannot create instance of {destProp.PropertyType.Name}");
-            await MapProperties(sourceValue, nestedObject, config, visited);
+            await MapProperties(sourceValue, nestedObject, config, visited, false); // Pass caseInsensitive
             destProp.SetValue(destination, nestedObject);
         }
     }
 
     private static async Task<object?> MapCollection(
-        IEnumerable? source,
-        Type destinationType,
-        MappingConfiguration? config,
-        HashSet<object>? visited)
+            IEnumerable? source,
+            Type destinationType,
+            MappingConfiguration? config,
+            HashSet<object>? visited)
     {
         if (source == null) return null;
 
@@ -290,16 +298,14 @@ public static class ObjectMapper
             object mappedItem;
             if (MappingUtils.IsSimpleType(item.GetType()))
             {
-                // Directly use the source item value for simple types
                 mappedItem = item;
             }
             else
             {
-                // Create a new instance and map for complex types
                 mappedItem = Activator.CreateInstance(itemType);
                 if (mappedItem == null)
                     throw new InvalidOperationException($"Cannot create instance of {itemType.Name}");
-                await MapProperties(item, mappedItem, config, visited);
+                await MapProperties(item, mappedItem, config, visited, false); // Pass caseInsensitive
             }
             destinationList.Add(mappedItem);
         }
@@ -314,3 +320,4 @@ public static class ObjectMapper
         return destinationList;
     }
 }
+
