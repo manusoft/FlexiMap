@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	<TargetFrameworks>net8.0;net9.0;</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	<AssemblyName>FlexiMap</AssemblyName>
+	<RootNamespace>FlexiMap</RootNamespace>
+	<PackageId>FlexiMap</PackageId>
+	<Description>FlexiMap is a lightweight object mapping utility for C# applications.</Description>
+	<Copyright>Copyright © 2025 ManuHub</Copyright>
+	<Authors>Manojbabu</Authors>
+	<PackageTags>FlexiMap;Mapper;AutoMapper;Mapster;Fast;Object;Mapping</PackageTags>
+	<PackageProjectUrl>https://github.com/manusoft/Mappy</PackageProjectUrl>
+	<RepositoryUrl>https://github.com/manusoft/Mappy</RepositoryUrl>
+	<PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+	<Icon>icon.png</Icon>
+	<PackageIcon>icon.png</PackageIcon>
+	<PackageReadmeFile>README.md</PackageReadmeFile>
+	<Version>3.0.0</Version>
+	<IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+</Project>
